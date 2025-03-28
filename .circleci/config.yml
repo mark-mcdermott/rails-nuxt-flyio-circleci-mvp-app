@@ -1,0 +1,89 @@
+version: 2.1
+
+executors:
+  docker-executor:
+    docker:
+      - image: cimg/base:stable
+    working_directory: ~/app
+
+jobs:
+  test:
+    executor: docker-executor
+    steps:
+      - checkout
+
+      - setup_remote_docker:
+          docker_layer_caching: true
+
+      - run:
+          name: Install Bundler 2.6.5
+          command: |
+            docker-compose -f docker-compose.ci.yml build --build-arg BUNDLER_VERSION=2.6.5
+
+      - run:
+          name: Build and Start Services
+          command: |
+            docker-compose -f docker-compose.ci.yml up -d --build
+
+      - run:
+          name: Wait for Backend to Be Ready
+          when: always
+          command: |
+            for i in {1..30}; do
+              echo "Trying to hit backend from inside container..."
+              if docker-compose -f docker-compose.ci.yml exec -T backend curl -s http://localhost:3000/api/v1/up | grep 'OK'; then
+                echo "✅ Backend is ready!"
+                exit 0
+              fi
+              echo "Waiting for backend..."
+              sleep 5
+            done
+            echo "❌ Backend failed to start in time"
+            docker-compose -f docker-compose.ci.yml logs backend || echo "No logs found"
+            touch backend_failed
+
+      - run:
+          name: Inspect Backend Container
+          when: always
+          command: |
+            docker ps -a
+            echo "------"
+            docker-compose -f docker-compose.ci.yml logs backend || echo "No logs found"
+            echo "------"
+            docker-compose -f docker-compose.ci.yml exec backend ls -lah /app/log || echo "Log dir not found"
+
+      - run:
+          name: Debug Backend Logs
+          when: always
+          command: docker-compose -f docker-compose.ci.yml logs backend || echo "No logs found"
+
+      - run:
+          name: Tail Rails Test Log
+          when: always
+          command: docker-compose -f docker-compose.ci.yml exec backend sh -c "cat log/test.log || echo 'log/test.log not found'"
+
+      - run:
+          name: Run Backend Tests
+          command: docker-compose -f docker-compose.ci.yml exec backend bundle exec rspec
+
+      - run:
+          name: Run Frontend Tests (Vitest + Playwright)
+          command: docker-compose -f docker-compose.ci.yml exec frontend sh -c "npm run vitest -- --run tests/components && npx playwright test tests/e2e"
+
+      - run:
+          name: Show Rails Logs (if needed)
+          when: always
+          command: docker-compose -f docker-compose.ci.yml logs backend || echo "No logs found"
+
+      - run:
+          name: Fail Job If Backend Died
+          command: |
+            if [ -f backend_failed ]; then
+              echo "❌ Backend failed flag detected. Failing job."
+              exit 1
+            fi
+
+workflows:
+  build_and_test:
+    jobs:
+      - test
