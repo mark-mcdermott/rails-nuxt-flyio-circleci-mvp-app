@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: backend_test
+    ports:
+      - "5432:5432"
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.ci
+    environment:
+      RAILS_ENV: test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: backend_test
+      POSTGRES_HOST: postgres
+    depends_on:
+      - postgres
+    ports:
+      - "3000:3000"
+    command: >
+      sh -c "bundle exec rails db:prepare && \
+            echo '✅ DB ready' && \
+            bundle exec rails server -b 0.0.0.0 -p 3000"
+            # bundle exec rails server -b 0.0.0.0 -p 3000 || \
+            # (echo '❌ Rails failed to boot, dumping log:' && tail -n 50 log/test.log)"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.ci
+    environment:
+      NODE_ENV: test
+      CI: "true"
+      API_BASE: http://backend:3000/api/v1
+    depends_on:
+      - backend
+    ports:
+      - "3001:3000"
+    command: npm run dev

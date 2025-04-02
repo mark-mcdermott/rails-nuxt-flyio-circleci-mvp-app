@@ -1,0 +1,49 @@
+# frontend/Dockerfile.ci
+# This is only for CircleCI testing, not Fly.io deployment
+FROM node:21.7.1-slim
+
+WORKDIR /app
+
+# Install system dependencies for headless testing
+RUN apt-get update -qq && apt-get install --no-install-recommends -y \
+  wget \
+  gnupg \
+  ca-certificates \
+  libnss3 \
+  libatk1.0-0 \
+  libatk-bridge2.0-0 \
+  libcups2 \
+  libdrm2 \
+  libxcomposite1 \
+  libxdamage1 \
+  libxrandr2 \
+  libgbm1 \
+  libasound2 \
+  libxshmfence1 \
+  libxfixes3 \
+  libxrender1 \
+  libxtst6 \
+  libxss1 \
+  xdg-utils \
+  fonts-liberation \
+  libgtk-3-0 \
+  libcurl4 \
+  python-is-python3 \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install dependencies
+COPY frontend/package*.json ./
+RUN npm ci
+
+# Install dev dependencies for Vitest and Playwright
+RUN npm install --save-dev @nuxt/test-utils vitest @vue/test-utils happy-dom playwright-core \
+  @playwright/test pixelmatch playwright-expect
+
+# Copy app source code
+COPY frontend/ .
+
+# Install Playwright browser dependencies
+RUN npx playwright install --with-deps
+
+# Build Nuxt app
+RUN npm run build
